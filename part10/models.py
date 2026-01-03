@@ -1,49 +1,6 @@
 from __future__ import annotations
 from typing import List, Dict, Any, Tuple
 
-class Configuration:
-    """
-        A small configuration container for user preferences in the IR system.
-        Stores two settings:
-          - highlight: whether matches should be highlighted using ANSI colors.
-          - search_mode: logical mode for combining multiple search terms ("AND" or "OR").
-    """
-    def __init__(self):
-        # Default settings used at program startup.
-        self.highlight = True
-        self.search_mode = "AND"
-
-    def copy(self):
-        """
-            Return a *shallow copy* of this configuration object.
-            Useful when you want to pass config around without mutating the original.
-        """
-        copy = Configuration()
-        copy.highlight = self.highlight
-        copy.search_mode = self.search_mode
-        return copy
-
-    def update(self, other: Dict[str, Any]):
-        """
-            Update this configuration using values from a (loaded) dictionary.
-            Only accepts valid keys and types:
-              - "highlight": must be a boolean
-              - "search_mode": must be "AND" or "OR"
-
-            Invalid entries are silently ignored, ensuring robustness
-            against corrupted or manually edited config files.
-        """
-        if "highlight" in other and isinstance(other["highlight"], bool):
-            self.highlight = other["highlight"]
-
-        if "search_mode" in other and other["search_mode"] in ["AND", "OR"]:
-            self.search_mode = other["search_mode"]
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "highlight": self.highlight,
-            "search_mode": self.search_mode,
-        }
 
 class Sonnet:
     def __init__(self, sonnet_data: Dict[str, Any]):
@@ -90,6 +47,7 @@ class LineMatch:
     def copy(self):
         return LineMatch(self.line_no, self.text, self.spans)
 
+
 class SearchResult:
     def __init__(self, title: str, title_spans: List[Tuple[int, int]], line_matches: List[LineMatch], matches: int) -> None:
         self.title = title
@@ -101,7 +59,7 @@ class SearchResult:
         return SearchResult(self.title, self.title_spans, self.line_matches, self.matches)
 
     @staticmethod
-    def ansi_highlight(text: str, spans):
+    def ansi_highlight(text: str, spans: List[Tuple[int, int]], highlight_mode) -> str:
         """Return text with ANSI highlight escape codes inserted."""
         if not spans:
             return text
@@ -119,13 +77,18 @@ class SearchResult:
                 current_start, current_end = s, e
         merged.append((current_start, current_end))
 
+        if highlight_mode == "GREEN":
+            color_code = "\033[1;92m"  # bold light-green text
+        else:
+            color_code = "\033[43m\033[30m"
+
         # Build highlighted string
         out = []
         i = 0
         for s, e in merged:
             out.append(text[i:s])
-            # ToDo 0: You will need to use the new setting and for it a different ANSI color code: "\033[1;92m"
-            out.append("\033[43m\033[30m")  # yellow background, black text
+            # out.append("\033[43m\033[30m")  # yellow background, black text
+            out.append(color_code)
             out.append(text[s:e])
             # ToDo 0: This stays the same. It just means "continue with default colors"
             out.append("\033[0m")           # reset
@@ -133,10 +96,10 @@ class SearchResult:
         out.append(text[i:])
         return "".join(out)
 
-    def print(self, idx, highlight, total_docs):
+    def print(self, idx, highlight, total_docs, highlight_mode):
         title_line = (
             # ToDo 0: You will need to pass the new setting, the highlight_mode to ansi_highlight and use it there
-            self.ansi_highlight(self.title, self.title_spans)
+            self.ansi_highlight(self.title, self.title_spans, highlight_mode)
             if highlight
             else self.title
         )
@@ -144,7 +107,7 @@ class SearchResult:
         for lm in self.line_matches:
             line_out = (
                 # ToDo 0: You will need to pass the new setting, the highlight_mode to ansi_highlight and use it there
-                self.ansi_highlight(lm.text, lm.spans)
+                self.ansi_highlight(lm.text, lm.spans, highlight_mode)
                 if highlight
                 else lm.text
             )
@@ -172,4 +135,38 @@ class SearchResult:
 
         return combined
 
+# ------------------------- Search behaviour ---------------------------------
 
+
+class SonnetsSearcher:
+    def __init__(self, sonnets: List[Sonnet]):
+        self.sonnets = sonnets
+
+    def search(self, query: str, search_mode: str) -> List[SearchResult]:
+        words = query.split()
+        combined_results: List[SearchResult] = []
+
+        for word in words:
+            results = [s.search_for(word) for s in self.sonnets]
+
+            if not combined_results:
+                # First word: initialize combined_results
+                combined_results = results
+            else:
+                # Merge with previous results
+                for i in range(len(combined_results)):
+                    combined_result = combined_results[i]
+                    result = results[i]
+
+                    if search_mode.upper() == "AND":
+                        if combined_result.matches > 0 and result.matches > 0:
+                            combined_results[i] = combined_result.combine_with(result)
+                        else:
+                            # No match in one of them
+                            combined_results[i].matches = 0
+                    elif search_mode.upper() == "OR":
+                        combined_results[i] = combined_result.combine_with(result)
+                    else:
+                        raise ValueError(f"Unknown search mode: {search_mode}")
+
+        return combined_results
