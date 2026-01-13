@@ -11,8 +11,8 @@ import time
 
 from .constants import BANNER, HELP
 from .models import SearchResult, SonnetsSearcher
-from .file_utilities import load_config, load_sonnets, highlight_handler, search_mode_handler, hl_mode_handler
-
+from .file_utilities import load_config, load_sonnets
+from .command_handlers import highlight_handler, search_mode_handler, hl_mode_handler
 
 def print_results(
     query: str,
@@ -80,6 +80,7 @@ def main() -> None:
             )
 
             if handled:
+                config.save()
                 continue
 
             print("Unknown command. Type :help for commands.")
